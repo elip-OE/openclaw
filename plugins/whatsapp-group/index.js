@@ -203,6 +203,25 @@ async function handleLeave(args) {
   };
 }
 
+async function handleSend(args) {
+  const sock = getWhatsAppSocket(args.accountId);
+  const groupJid = args.groupJid;
+  if (!groupJid) throw new Error("groupJid is required for send action");
+  const text = args.text;
+  if (!text) throw new Error("text is required for send action");
+
+  const result = await sock.sendMessage(groupJid, { text });
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ ok: true, groupJid, messageId: result?.key?.id }),
+      },
+    ],
+  };
+}
+
 export default {
   id: "whatsapp-group",
   name: "WhatsApp Group Management",
@@ -214,15 +233,20 @@ export default {
         'Create or manage WhatsApp groups. Actions: "create" (new group with participants and optional picture), ' +
         '"update" (change name, description, picture, or announcement mode), ' +
         '"info" (get group metadata and participants), ' +
-        '"leave" (leave a group). ' +
+        '"leave" (leave a group), ' +
+        '"send" (send a text message to a group). ' +
         "For pictureUrl, pass a local file path or HTTP URL to an image (JPEG/PNG).",
       parameters: {
         type: "object",
         properties: {
           action: {
             type: "string",
-            enum: ["create", "update", "info", "leave"],
+            enum: ["create", "update", "info", "leave", "send"],
             description: "The group management action to perform",
+          },
+          text: {
+            type: "string",
+            description: "Message text (required for send action)",
           },
           accountId: {
             type: "string",
@@ -267,9 +291,11 @@ export default {
             return handleInfo(parsed);
           case "leave":
             return handleLeave(parsed);
+          case "send":
+            return handleSend(parsed);
           default:
             throw new Error(
-              `Unknown action "${parsed.action}". Use: create, update, info, leave`
+              `Unknown action "${parsed.action}". Use: create, update, info, leave, send`
             );
         }
       },
