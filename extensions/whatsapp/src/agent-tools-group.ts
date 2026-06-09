@@ -1,5 +1,4 @@
 // Whatsapp plugin module implements agent tools group management behavior.
-import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { jsonResult } from "openclaw/plugin-sdk/channel-actions";
 import type { ChannelAgentTool } from "openclaw/plugin-sdk/channel-contract";
@@ -32,43 +31,62 @@ async function fetchImageBuffer(pictureUrl: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
+function normalizeParticipants(rawParticipants: unknown[]): string[] {
+  return rawParticipants.map((p: unknown) => {
+    const s = String(p).trim().replace(/^\+/, "");
+    return s.includes("@") ? s : `${s}@s.whatsapp.net`;
+  });
+}
+
 export function createWhatsAppGroupTool(): ChannelAgentTool {
   return {
     label: "WhatsApp Group",
     name: "whatsapp_group",
     description:
-      "Create or manage WhatsApp groups. Supports: create (new group with participants), " +
-      "update (change name, description, picture, or announcement mode), " +
-      "info (get group metadata), leave (leave a group).",
+      "Create or manage WhatsApp groups. Actions: " +
+      "create (new group with participants and optional picture), " +
+      "update (change name, description, picture, announcement mode, or manage participants via participantAction=add/remove/promote), " +
+      "info (get group metadata and participants), " +
+      "leave (leave a group), " +
+      "send (send a text message to a group).",
     parameters: Type.Object({
-      action: Type.Unsafe<"create" | "update" | "info" | "leave">({
+      action: Type.Unsafe<"create" | "update" | "info" | "leave" | "send">({
         type: "string",
-        enum: ["create", "update", "info", "leave"],
+        enum: ["create", "update", "info", "leave", "send"],
+        description: "The group management action to perform",
       }),
-      accountId: Type.Optional(Type.String()),
-      // create params
-      name: Type.Optional(Type.String({ description: "Group name (required for create)" })),
+      accountId: Type.Optional(Type.String({ description: "WhatsApp account ID (default: 'default')" })),
+      name: Type.Optional(Type.String({ description: "Group name (required for create, optional for update)" })),
       participants: Type.Optional(
         Type.Array(Type.String(), {
-          description: "E.164 phone numbers or JIDs of participants (required for create)",
+          description:
+            "E.164 phone numbers. Required for create and for update with participantAction.",
         }),
       ),
-      // update / info / leave params
       groupJid: Type.Optional(
-        Type.String({ description: "Group JID (e.g. 1234567890-1234567890@g.us)" }),
+        Type.String({ description: "Group JID (required for update/info/leave/send)" }),
       ),
-      // update-only params
-      description: Type.Optional(Type.String()),
+      description: Type.Optional(Type.String({ description: "Group description (for update)" })),
       pictureUrl: Type.Optional(
         Type.String({
-          description:
-            "URL or local file path for the group profile picture. " +
-            "Accepts http/https URLs or absolute/relative filesystem paths.",
+          description: "URL or local path to group picture image (JPEG/PNG)",
         }),
       ),
       announcement: Type.Optional(
         Type.Boolean({
-          description: "true = only admins can send messages; false = all members can",
+          description: "If true, only admins can send messages",
+        }),
+      ),
+      text: Type.Optional(
+        Type.String({ description: "Message text (required for send action)" }),
+      ),
+      participantAction: Type.Optional(
+        Type.Unsafe<"add" | "remove" | "promote">({
+          type: "string",
+          enum: ["add", "remove", "promote"],
+          description:
+            "Participant management sub-action (use with action=update and participants array). " +
+            "add = add members, remove = remove members, promote = make admin.",
         }),
       ),
     }),
@@ -94,7 +112,7 @@ export function createWhatsAppGroupTool(): ChannelAgentTool {
       }
 
       try {
-        // ── CREATE ──────────────────────────────────────────────────────────
+        // -- CREATE --------------------------------------------------------
         if (action === "create") {
           const name = readOptionalString(a.name);
           if (!name) {
@@ -107,12 +125,7 @@ export function createWhatsAppGroupTool(): ChannelAgentTool {
               error: "Missing required parameter: participants (must be a non-empty array)",
             });
           }
-          // Normalise participants to Baileys JID format (strip + prefix)
-          const participants = rawParticipants.map((p: unknown) => {
-            const s = String(p).trim().replace(/^\+/, "");
-            return s.includes("@") ? s : `${s}@s.whatsapp.net`;
-          });
-
+          const participants = normalizeParticipants(rawParticipants);
           const meta = await sock.groupCreate(name, participants);
           const groupJid = meta.id;
 
@@ -137,13 +150,45 @@ export function createWhatsAppGroupTool(): ChannelAgentTool {
           return jsonResult({ ok: true, groupJid, name: meta.subject });
         }
 
-        // ── UPDATE ──────────────────────────────────────────────────────────
+        // -- UPDATE --------------------------------------------------------
         if (action === "update") {
           const groupJid = readOptionalString(a.groupJid);
           if (!groupJid) {
             return jsonResult({ ok: false, error: "Missing required parameter: groupJid" });
           }
 
+          // Handle participant management sub-action
+          const participantAction = readOptionalString(a.participantAction);
+          if (participantAction) {
+            const validActions = ["add", "remove", "promote"];
+            if (!validActions.includes(participantAction)) {
+              return jsonResult({
+                ok: false,
+                error: `Invalid participantAction '${participantAction}'. Valid: add, remove, promote`,
+              });
+            }
+            const rawParticipants = Array.isArray(a.participants) ? a.participants : [];
+            if (rawParticipants.length === 0) {
+              return jsonResult({
+                ok: false,
+                error: "Missing required parameter: participants (needed for participantAction)",
+              });
+            }
+            const participants = normalizeParticipants(rawParticipants);
+            const result = await sock.groupParticipantsUpdate(
+              groupJid,
+              participants,
+              participantAction as "add" | "remove" | "promote",
+            );
+            return jsonResult({
+              ok: true,
+              groupJid,
+              participantAction,
+              result,
+            });
+          }
+
+          // Standard metadata updates
           const updates: string[] = [];
           const errors: string[] = [];
 
@@ -175,7 +220,7 @@ export function createWhatsAppGroupTool(): ChannelAgentTool {
           return jsonResult({ ok: errors.length === 0, updated: updates, errors });
         }
 
-        // ── INFO ────────────────────────────────────────────────────────────
+        // -- INFO ----------------------------------------------------------
         if (action === "info") {
           const groupJid = readOptionalString(a.groupJid);
           if (!groupJid) {
@@ -198,19 +243,37 @@ export function createWhatsAppGroupTool(): ChannelAgentTool {
           });
         }
 
-        // ── LEAVE ────────────────────────────────────────────────────────────
+        // -- LEAVE ---------------------------------------------------------
         if (action === "leave") {
           const groupJid = readOptionalString(a.groupJid);
           if (!groupJid) {
             return jsonResult({ ok: false, error: "Missing required parameter: groupJid" });
           }
           await sock.groupLeave(groupJid);
-          return jsonResult({ ok: true });
+          return jsonResult({ ok: true, groupJid });
+        }
+
+        // -- SEND ----------------------------------------------------------
+        if (action === "send") {
+          const groupJid = readOptionalString(a.groupJid);
+          if (!groupJid) {
+            return jsonResult({ ok: false, error: "Missing required parameter: groupJid" });
+          }
+          const text = readOptionalString(a.text);
+          if (!text) {
+            return jsonResult({ ok: false, error: "Missing required parameter: text" });
+          }
+          const sent = await sock.sendMessage(groupJid, { text });
+          return jsonResult({
+            ok: true,
+            groupJid,
+            messageId: sent?.key?.id ?? null,
+          });
         }
 
         return jsonResult({
           ok: false,
-          error: `Unknown action '${action}'. Valid actions: create, update, info, leave`,
+          error: `Unknown action '${action}'. Valid actions: create, update, info, leave, send`,
         });
       } catch (err) {
         return jsonResult({
