@@ -20,6 +20,13 @@ import {
 } from "../../outbound-media-contract.js";
 import type { WhatsAppReplyDeliveryResult } from "../deliver-reply.js";
 import type { WebInboundMsg } from "../types.js";
+import {
+  buildWhatsAppErrorScopeKey,
+  isSilentWhatsAppErrorPolicy,
+  resolveWhatsAppErrorPolicy,
+  shouldSuppressWhatsAppError,
+} from "../../error-policy.js";
+import { resolveMergedWhatsAppAccountConfig } from "../../account-config.js";
 import { formatGroupMembers } from "./group-members.js";
 import type { GroupHistoryEntry } from "./inbound-context.js";
 import {
@@ -163,12 +170,30 @@ function resolveWhatsAppDisableBlockStreaming(cfg: ReturnType<LoadConfigFn>): bo
 function resolveWhatsAppDeliverablePayload(
   payload: ReplyPayload,
   info: { kind: ReplyLifecycleKind },
+  errorPolicyOverride?: {
+    policy: "always" | "once" | "silent";
+    cooldownMs: number;
+    scopeKey: string;
+  },
 ): ReplyPayload | null {
   if (payload.isReasoning === true || payload.isCompactionNotice === true) {
     return null;
   }
   if (payload.isError === true) {
-    return null;
+    if (!errorPolicyOverride || isSilentWhatsAppErrorPolicy(errorPolicyOverride.policy)) {
+      return null;
+    }
+    if (
+      errorPolicyOverride.policy === "once" &&
+      shouldSuppressWhatsAppError({
+        scopeKey: errorPolicyOverride.scopeKey,
+        cooldownMs: errorPolicyOverride.cooldownMs,
+        errorMessage: typeof payload.text === "string" ? payload.text : undefined,
+      })
+    ) {
+      return null;
+    }
+    // errorPolicy "always" or "once" (first occurrence): allow the error payload through
   }
   if (info.kind === "tool") {
     if (!resolveSendableOutboundReplyParts(payload).hasMedia) {
@@ -563,6 +588,30 @@ export async function dispatchWhatsAppBufferedReply(params: {
     accountId: params.route.accountId,
   });
   const mediaLocalRoots = getAgentScopedMediaLocalRoots(params.cfg, params.route.agentId);
+
+  // Resolve WhatsApp error policy for this account/group.
+  const mergedAccount = resolveMergedWhatsAppAccountConfig({
+    cfg: params.cfg,
+    accountId: params.route.accountId,
+  });
+  const groupErrorConfig =
+    params.msg.chatType === "group" && params.conversationId
+      ? mergedAccount.groups?.[params.conversationId]
+      : undefined;
+  const errorPolicy = resolveWhatsAppErrorPolicy({
+    accountConfig: mergedAccount,
+    groupConfig: groupErrorConfig as { errorPolicy?: "always" | "once" | "silent"; errorCooldownMs?: number } | undefined,
+  });
+  const errorScopeKey = buildWhatsAppErrorScopeKey({
+    accountId: mergedAccount.accountId,
+    chatId: params.conversationId,
+  });
+  const errorPolicyOverride = {
+    policy: errorPolicy.policy,
+    cooldownMs: errorPolicy.cooldownMs,
+    scopeKey: errorScopeKey,
+  };
+
   const sourceReplyChatType =
     typeof params.context.ChatType === "string" ? params.context.ChatType : params.msg.chatType;
   const sourceReplyCommandSource =
@@ -668,7 +717,7 @@ export async function dispatchWhatsAppBufferedReply(params: {
         }
       },
       deliver: async (payload: ReplyPayload, info: { kind: ReplyLifecycleKind }) => {
-        const deliveryPayload = resolveWhatsAppDeliverablePayload(payload, info);
+        const deliveryPayload = resolveWhatsAppDeliverablePayload(payload, info, errorPolicyOverride);
         if (!deliveryPayload) {
           return whatsAppReplyDeliveryVisibility(false);
         }

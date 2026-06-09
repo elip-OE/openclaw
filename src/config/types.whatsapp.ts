@@ -23,12 +23,18 @@ export type WhatsAppActionConfig = {
 
 export type WhatsAppReactionLevel = ReactionLevel;
 
+export type WhatsAppErrorPolicy = "always" | "once" | "silent";
+
 export type WhatsAppGroupConfig = {
   requireMention?: boolean;
   tools?: GroupToolPolicyConfig;
   toolsBySender?: GroupToolPolicyBySenderConfig;
   /** Optional system prompt for this group. */
   systemPrompt?: string;
+  /** Error reply policy for this group. Overrides account/channel-level setting. */
+  errorPolicy?: WhatsAppErrorPolicy;
+  /** Cooldown window for `errorPolicy: "once"` in milliseconds. */
+  errorCooldownMs?: number;
 };
 
 export type WhatsAppDirectConfig = {
@@ -112,6 +118,15 @@ type WhatsAppSharedConfig = {
   heartbeat?: ChannelHeartbeatVisibilityConfig;
   /** Channel health monitor overrides for this channel/account. */
   healthMonitor?: ChannelHealthMonitorConfig;
+  /**
+   * Controls how API/provider error messages are handled:
+   * - "always": send error messages to the chat
+   * - "once": send the first error, then suppress duplicates for errorCooldownMs
+   * - "silent" (default): never send error messages to the chat
+   */
+  errorPolicy?: WhatsAppErrorPolicy;
+  /** Cooldown window for `errorPolicy: "once"` in milliseconds. Default: 4 hours. */
+  errorCooldownMs?: number;
 };
 
 type WhatsAppConfigCore = {

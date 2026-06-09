@@ -20,12 +20,16 @@ import {
 
 const ToolPolicyBySenderSchema = z.record(z.string(), ToolPolicySchema).optional();
 
+const WhatsAppErrorPolicySchema = z.enum(["always", "once", "silent"]).optional();
+
 const WhatsAppGroupEntrySchema = z
   .object({
     requireMention: z.boolean().optional(),
     tools: ToolPolicySchema,
     toolsBySender: ToolPolicyBySenderSchema,
     systemPrompt: z.string().optional(),
+    errorPolicy: WhatsAppErrorPolicySchema,
+    errorCooldownMs: z.number().int().nonnegative().optional(),
   })
   .strict()
   .optional();
@@ -108,6 +112,8 @@ function buildWhatsAppCommonShape(params: { useDefaults: boolean }) {
     heartbeat: ChannelHeartbeatVisibilitySchema,
     healthMonitor: ChannelHealthMonitorSchema,
     pluginHooks: WhatsAppPluginHooksSchema,
+    errorPolicy: WhatsAppErrorPolicySchema,
+    errorCooldownMs: z.number().int().nonnegative().optional(),
   };
 }
 
