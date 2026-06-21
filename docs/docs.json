@@ -1088,6 +1088,7 @@
               {
                 "group": "Mainstream messaging",
                 "pages": [
+                  "channels/aws-sms",
                   "channels/discord",
                   "channels/slack",
                   "channels/telegram",

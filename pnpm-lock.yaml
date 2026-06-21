@@ -396,6 +396,25 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/aws-sms:
+    dependencies:
+      '@aws-sdk/client-pinpoint-sms-voice-v2':
+        specifier: 3.1056.0
+        version: 3.1056.0
+      '@aws-sdk/client-s3':
+        specifier: 3.1056.0
+        version: 3.1056.0
+      '@aws-sdk/client-sns':
+        specifier: 3.1056.0
+        version: 3.1056.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   extensions/azure-speech:
     devDependencies:
       '@openclaw/plugin-sdk':
@@ -2081,8 +2100,16 @@ packages:
     resolution: {integrity: sha512-Fywg6+B39uGiYZRYFEsOXbIeHQ8wvtMqlt6FUwWev8N2H+V0pVdgCKn32pSOzud1i17wnm5gpB2VXZEoyVHc2A==}
     engines: {node: '>=20.0.0'}
 
+  '@aws-sdk/client-pinpoint-sms-voice-v2@3.1056.0':
+    resolution: {integrity: sha512-Xsc/wP6WoyuQARrW6IgVeURLypwMDayPjeRgd69wvOfXsNPa5oZ1GVpsZMp7zHXbUh9Q+V+L9exSEhzJ3RBvYw==}
+    engines: {node: '>=20.0.0'}
+
   '@aws-sdk/client-s3@3.1056.0':
     resolution: {integrity: sha512-WfMZEM2eC96anIT0RzR/QmhaefWKsNjOHNv09ORBkcA++ULBnm1fRau+KKGEIbr5nDnf9BTG7E7U3oOVklQS8g==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-sns@3.1056.0':
+    resolution: {integrity: sha512-caDjU24pMJlG+WJp3fEDD/LxkRHWiionBjE6uS3fzaFp3Fl5UTr+MFiaT96oQDl6akG3HFtJfpEvYHuitxkNzA==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.974.13':
@@ -7468,6 +7495,19 @@ snapshots:
       '@smithy/types': 4.14.2
       tslib: 2.8.1
 
+  '@aws-sdk/client-pinpoint-sms-voice-v2@3.1056.0':
+    dependencies:
+      '@aws-crypto/sha256-browser': 5.2.0
+      '@aws-crypto/sha256-js': 5.2.0
+      '@aws-sdk/core': 3.974.13
+      '@aws-sdk/credential-provider-node': 3.972.46
+      '@aws-sdk/types': 3.973.9
+      '@smithy/core': 3.24.5
+      '@smithy/fetch-http-handler': 5.4.5
+      '@smithy/node-http-handler': 4.7.5
+      '@smithy/types': 4.14.2
+      tslib: 2.8.1
+
   '@aws-sdk/client-s3@3.1056.0':
     dependencies:
       '@aws-crypto/sha1-browser': 5.2.0
@@ -7482,6 +7522,19 @@ snapshots:
       '@aws-sdk/middleware-sdk-s3': 3.972.44
       '@aws-sdk/middleware-ssec': 3.972.11
       '@aws-sdk/signature-v4-multi-region': 3.996.30
+      '@aws-sdk/types': 3.973.9
+      '@smithy/core': 3.24.5
+      '@smithy/fetch-http-handler': 5.4.5
+      '@smithy/node-http-handler': 4.7.5
+      '@smithy/types': 4.14.2
+      tslib: 2.8.1
+
+  '@aws-sdk/client-sns@3.1056.0':
+    dependencies:
+      '@aws-crypto/sha256-browser': 5.2.0
+      '@aws-crypto/sha256-js': 5.2.0
+      '@aws-sdk/core': 3.974.13
+      '@aws-sdk/credential-provider-node': 3.972.46
       '@aws-sdk/types': 3.973.9
       '@smithy/core': 3.24.5
       '@smithy/fetch-http-handler': 5.4.5

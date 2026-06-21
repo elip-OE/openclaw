@@ -1,0 +1,42 @@
+{
+  "name": "@openclaw/aws-sms",
+  "version": "2026.6.2",
+  "description": "OpenClaw AWS End User Messaging SMS channel plugin with text, MMS, and SNS inbound webhooks.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openclaw/openclaw"
+  },
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-pinpoint-sms-voice-v2": "3.1056.0",
+    "@aws-sdk/client-s3": "3.1056.0",
+    "@aws-sdk/client-sns": "3.1056.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "aws-sms",
+      "label": "AWS SMS",
+      "selectionLabel": "AWS SMS",
+      "detailLabel": "AWS End User Messaging SMS",
+      "docsPath": "/channels/aws-sms",
+      "docsLabel": "aws-sms",
+      "blurb": "AWS End User Messaging SMS with SNS inbound webhooks, MMS outbound, and default AWS credentials.",
+      "order": 87,
+      "quickstartAllowFrom": true
+    },
+    "compat": {
+      "pluginApi": ">=2026.6.2"
+    },
+    "build": {
+      "openclawVersion": "2026.6.2"
+    }
+  }
+}
