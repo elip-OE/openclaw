@@ -1070,6 +1070,7 @@
                 "pages": [
                   "channels/irc",
                   "channels/mattermost",
+                  "channels/aws-sms",
                   "channels/nextcloud-talk",
                   "channels/nostr",
                   "channels/tlon",
