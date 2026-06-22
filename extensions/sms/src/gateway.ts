@@ -1,11 +1,10 @@
-// Sms plugin module implements gateway behavior.
-import { waitUntilAbort } from "openclaw/plugin-sdk/channel-outbound";
+// Twilio SMS gateway integration — adapted for 2026.5.7 (channel-lifecycle).
+import { waitUntilAbort } from "openclaw/plugin-sdk/channel-lifecycle";
 import { registerPluginHttpRoute } from "openclaw/plugin-sdk/webhook-ingress";
 import type { ResolvedSmsAccount } from "./types.js";
 import { createSmsWebhookHandler, type SmsWebhookHandlerParams } from "./webhook.js";
 
 const CHANNEL_ID = "sms";
-
 const activeRoutes = new Map<string, () => void>();
 const activeRoutePaths = new Map<string, string>();
 
@@ -26,19 +25,11 @@ function normalizeWebhookPath(path: string): string {
 
 export function collectSmsStartupWarnings(account: ResolvedSmsAccount): string[] {
   const warnings: string[] = [];
-  if (
-    !account.accountSid ||
-    !account.authToken ||
-    (!account.fromNumber && !account.messagingServiceSid)
-  ) {
-    warnings.push(
-      "- SMS: accountSid, authToken, and fromNumber or messagingServiceSid are required.",
-    );
+  if (!account.accountSid || !account.authToken || (!account.fromNumber && !account.messagingServiceSid)) {
+    warnings.push("- SMS: accountSid, authToken, and fromNumber or messagingServiceSid are required.");
   }
   if (!account.publicWebhookUrl && !account.dangerouslyDisableSignatureValidation) {
-    warnings.push(
-      "- SMS: publicWebhookUrl is required for Twilio signature validation. Set dangerouslyDisableSignatureValidation=true only for local testing.",
-    );
+    warnings.push("- SMS: publicWebhookUrl is required for Twilio signature validation.");
   }
   if (account.dmPolicy === "allowlist" && account.allowFrom.length === 0) {
     warnings.push("- SMS: dmPolicy=allowlist with empty allowFrom rejects every sender.");
@@ -59,16 +50,12 @@ export function registerSmsWebhookRoute(params: {
   const webhookPath = normalizeWebhookPath(params.account.webhookPath);
   const currentPathOwner = activeRoutePaths.get(webhookPath);
   if (currentPathOwner && currentPathOwner !== params.account.accountId) {
-    throw new Error(
-      `SMS webhook path ${webhookPath} is already registered by account ${currentPathOwner}; configure a distinct webhookPath for account ${params.account.accountId}.`,
-    );
+    throw new Error(`SMS webhook path ${webhookPath} is already registered by account ${currentPathOwner}.`);
   }
   activeRoutes.get(key)?.();
   activeRoutePaths.delete(webhookPath);
   const unregister = registerPluginHttpRoute({
-    path: webhookPath,
-    auth: "plugin",
-    pluginId: CHANNEL_ID,
+    path: webhookPath, auth: "plugin", pluginId: CHANNEL_ID,
     accountId: params.account.accountId,
     log: (msg) => params.log?.info?.(msg),
     handler: createSmsWebhookHandler(params),
@@ -78,9 +65,7 @@ export function registerSmsWebhookRoute(params: {
   return () => {
     unregister();
     activeRoutes.delete(key);
-    if (activeRoutePaths.get(webhookPath) === params.account.accountId) {
-      activeRoutePaths.delete(webhookPath);
-    }
+    if (activeRoutePaths.get(webhookPath) === params.account.accountId) activeRoutePaths.delete(webhookPath);
   };
 }
 
@@ -96,18 +81,12 @@ export async function startSmsGatewayAccount(params: {
     return waitUntilAbort(params.abortSignal);
   }
   const warnings = collectSmsStartupWarnings(params.account);
-  if (warnings.some((warning) => warning.includes("required"))) {
-    for (const warning of warnings) {
-      params.log?.warn?.(warning);
-    }
+  if (warnings.some((w) => w.includes("required"))) {
+    for (const w of warnings) params.log?.warn?.(w);
     return waitUntilAbort(params.abortSignal);
   }
-  for (const warning of warnings) {
-    params.log?.warn?.(warning);
-  }
+  for (const w of warnings) params.log?.warn?.(w);
   const unregister = registerSmsWebhookRoute(params);
-  params.log?.info?.(
-    `Registered SMS webhook route ${params.account.webhookPath} for account ${params.account.accountId}`,
-  );
+  params.log?.info?.(`Registered SMS webhook route ${params.account.webhookPath} for account ${params.account.accountId}`);
   return waitUntilAbort(params.abortSignal, unregister);
 }

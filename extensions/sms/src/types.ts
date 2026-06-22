@@ -1,10 +1,9 @@
-// Sms type declarations define plugin contracts.
-import type { SecretInput } from "openclaw/plugin-sdk/secret-input";
+// Twilio SMS type declarations.
 
 export type SmsChannelConfigFields = {
   enabled?: boolean;
   accountSid?: string;
-  authToken?: SecretInput;
+  authToken?: string;
   fromNumber?: string;
   messagingServiceSid?: string;
   defaultTo?: string;

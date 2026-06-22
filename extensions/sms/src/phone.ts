@@ -1,9 +1,8 @@
-// Sms plugin module implements phone behavior.
+// Twilio SMS phone number normalization.
+
 export function normalizeSmsPhoneNumber(raw: string): string {
   const trimmed = raw.trim().replace(/^(?:sms|twilio-sms):/i, "");
-  if (!trimmed) {
-    return "";
-  }
+  if (!trimmed) return "";
   const withPlus = trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
   return withPlus.replace(/[^\d+]/g, "");
 }
@@ -14,8 +13,6 @@ export function looksLikeSmsPhoneNumber(raw: string): boolean {
 }
 
 export function normalizeSmsAllowFrom(raw: string): string {
-  if (raw.trim() === "*") {
-    return "*";
-  }
+  if (raw.trim() === "*") return "*";
   return normalizeSmsPhoneNumber(raw).toLowerCase();
 }

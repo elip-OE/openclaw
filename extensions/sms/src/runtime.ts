@@ -1,4 +1,4 @@
-// Sms plugin module implements runtime behavior.
+// Twilio SMS runtime store.
 import { createPluginRuntimeStore, type PluginRuntime } from "openclaw/plugin-sdk/runtime-store";
 
 const { setRuntime: setSmsRuntime, getRuntime: getSmsRuntime } =

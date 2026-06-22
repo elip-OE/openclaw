@@ -1,5 +1,6 @@
 // Aws Sms plugin module implements inbound behavior.
-import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-ingress-runtime";
+import { resolveInboundDirectDmAccessWithRuntime } from "openclaw/plugin-sdk/direct-dm-access";
+import { isSenderIdAllowed } from "openclaw/plugin-sdk/allow-from";
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
@@ -25,28 +26,32 @@ async function authorizeAwsSmsSender(params: {
   channelRuntime: AwsSmsChannelRuntime;
   from: string;
 }) {
-  return await resolveStableChannelMessageIngress({
-    channelId: CHANNEL_ID,
-    accountId: params.account.accountId,
+  const result = await resolveInboundDirectDmAccessWithRuntime({
     cfg: params.cfg,
-    identity: {
-      key: "phone",
-      entryIdPrefix: "aws-sms-entry",
-    },
-    readStoreAllowFrom: async () =>
-      await params.channelRuntime.pairing.readAllowFromStore({
-        channel: CHANNEL_ID,
-        accountId: params.account.accountId,
-      }),
-    subject: { stableId: params.from },
-    conversation: {
-      kind: "direct",
-      id: "direct",
-    },
-    event: { mayPair: true },
+    channel: CHANNEL_ID,
+    accountId: params.account.accountId,
     dmPolicy: params.account.dmPolicy,
     allowFrom: params.account.allowFrom,
+    senderId: params.from,
+    rawBody: "",
+    isSenderAllowed: (senderId: string, allowFrom: string[]) =>
+      isSenderIdAllowed(senderId, allowFrom),
+    runtime: {
+      shouldComputeCommandAuthorized: () => false,
+      resolveCommandAuthorizedFromAuthorizers: () => true,
+    },
+    readStoreAllowFrom: async (provider: string, accountId: string) =>
+      await params.channelRuntime.pairing.readAllowFromStore({
+        channel: provider,
+        accountId,
+      }),
   });
+  return {
+    senderAccess: {
+      allowed: result.access.decision === "allow",
+      decision: result.access.decision,
+    },
+  };
 }
 
 async function issueAwsSmsPairingChallenge(params: {

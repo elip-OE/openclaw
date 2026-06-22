@@ -1,5 +1,5 @@
 // Aws Sms plugin module implements gateway behavior.
-import { waitUntilAbort } from "openclaw/plugin-sdk/channel-outbound";
+import { waitUntilAbort } from "openclaw/plugin-sdk/channel-lifecycle";
 import { registerPluginHttpRoute } from "openclaw/plugin-sdk/webhook-ingress";
 import { collectAwsSmsDoctorHints, collectAwsSmsStartupWarnings } from "./doctor.js";
 import type { ResolvedAwsSmsAccount } from "./types.js";

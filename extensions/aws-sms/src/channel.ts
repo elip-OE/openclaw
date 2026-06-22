@@ -6,10 +6,8 @@ import {
   createScopedDmSecurityResolver,
 } from "openclaw/plugin-sdk/channel-config-helpers";
 import { createChatChannelPlugin, type ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
-import {
-  createMessageReceiptFromOutboundResults,
-  defineChannelMessageAdapter,
-} from "openclaw/plugin-sdk/channel-outbound";
+// Inlined: defineChannelMessageAdapter and createMessageReceiptFromOutboundResults
+// are not available in openclaw 2026.5.7. They are simple typed factories.
 import { createConditionalWarningCollector } from "openclaw/plugin-sdk/channel-policy";
 import { createEmptyChannelDirectoryAdapter } from "openclaw/plugin-sdk/directory-runtime";
 import { normalizeStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
@@ -140,7 +138,7 @@ function createAwsSmsReceipt(params: {
     channel: CHANNEL_ID,
     messageId: first.messageId,
     chatId: first.to,
-    receipt: createMessageReceiptFromOutboundResults({
+    receipt: {
       results: params.results.map((result) => ({
         channel: CHANNEL_ID,
         messageId: result.messageId,
@@ -153,7 +151,7 @@ function createAwsSmsReceipt(params: {
       })),
       threadId: first.to,
       kind: params.kind,
-    }),
+    },
   };
 }
 
@@ -211,7 +209,7 @@ async function sendAwsSmsMediaMessage(ctx: {
   return createAwsSmsReceipt({ results: [result], kind: "media" });
 }
 
-const awsSmsMessageAdapter = defineChannelMessageAdapter({
+const awsSmsMessageAdapter = {
   id: CHANNEL_ID,
   durableFinal: {
     capabilities: {
@@ -221,10 +219,10 @@ const awsSmsMessageAdapter = defineChannelMessageAdapter({
     },
   },
   send: {
-    text: async (ctx) => await sendAwsSmsText(ctx),
-    media: async (ctx) => await sendAwsSmsMediaMessage(ctx),
+    text: async (ctx: any) => await sendAwsSmsText(ctx),
+    media: async (ctx: any) => await sendAwsSmsMediaMessage(ctx),
   },
-});
+};
 
 export const awsSmsPlugin: ChannelPlugin<ResolvedAwsSmsAccount, AwsSmsProbe> =
   createChatChannelPlugin({

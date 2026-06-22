@@ -1,4 +1,4 @@
-// Sms plugin module implements accounts behavior.
+// Twilio SMS account resolution.
 import { normalizeOptionalAccountId } from "openclaw/plugin-sdk/account-id";
 import {
   DEFAULT_ACCOUNT_ID,
@@ -9,11 +9,7 @@ import {
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/account-resolution";
 import { parseStrictInteger } from "openclaw/plugin-sdk/number-runtime";
-import {
-  hasConfiguredSecretInput,
-  normalizeResolvedSecretInputString,
-} from "openclaw/plugin-sdk/secret-input";
-import { normalizeStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeStringEntries } from "openclaw/plugin-sdk/string-normalization-runtime";
 import { normalizeSmsAllowFrom, normalizeSmsPhoneNumber } from "./phone.js";
 import type { ResolvedSmsAccount, SmsChannelConfig } from "./types.js";
 
@@ -26,9 +22,7 @@ function getChannelConfig(cfg: OpenClawConfig): SmsChannelConfig | undefined {
 }
 
 function parseList(raw: unknown): string[] {
-  if (!raw) {
-    return [];
-  }
+  if (!raw) return [];
   const entries = Array.isArray(raw)
     ? raw
     : typeof raw === "string"
@@ -38,12 +32,8 @@ function parseList(raw: unknown): string[] {
 }
 
 function parseTextChunkLimit(raw: unknown): number {
-  if (typeof raw === "number" && Number.isSafeInteger(raw) && raw > 0) {
-    return raw;
-  }
-  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
-    return parseStrictInteger(raw.trim()) ?? DEFAULT_TEXT_CHUNK_LIMIT;
-  }
+  if (typeof raw === "number" && Number.isSafeInteger(raw) && raw > 0) return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) return parseStrictInteger(raw.trim()) ?? DEFAULT_TEXT_CHUNK_LIMIT;
   return DEFAULT_TEXT_CHUNK_LIMIT;
 }
 
@@ -53,14 +43,9 @@ function firstNonBlankEnv(...values: Array<string | undefined>): string | undefi
 
 function hasBaseAccount(channelCfg: SmsChannelConfig | undefined): boolean {
   return Boolean(
-    channelCfg?.accountSid ||
-    hasConfiguredSecretInput(channelCfg?.authToken) ||
-    channelCfg?.fromNumber ||
-    channelCfg?.messagingServiceSid ||
-    process.env.TWILIO_ACCOUNT_SID ||
-    process.env.TWILIO_AUTH_TOKEN ||
-    process.env.TWILIO_PHONE_NUMBER ||
-    process.env.TWILIO_SMS_FROM ||
+    channelCfg?.accountSid || channelCfg?.authToken || channelCfg?.fromNumber || channelCfg?.messagingServiceSid ||
+    process.env.TWILIO_ACCOUNT_SID || process.env.TWILIO_AUTH_TOKEN ||
+    process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_SMS_FROM ||
     process.env.TWILIO_MESSAGING_SERVICE_SID,
   );
 }
@@ -81,58 +66,37 @@ export function resolveDefaultSmsAccountId(cfg: OpenClawConfig): string {
   });
 }
 
-export function resolveSmsAccount(
-  cfg: OpenClawConfig,
-  accountId?: string | null,
-): ResolvedSmsAccount {
+export function resolveSmsAccount(cfg: OpenClawConfig, accountId?: string | null): ResolvedSmsAccount {
   const channelCfg = getChannelConfig(cfg) ?? {};
   const id = normalizeOptionalAccountId(accountId) ?? resolveDefaultSmsAccountId(cfg);
   const accountConfig = resolveAccountEntry(channelCfg.accounts, id);
+
   const channelConfig: Record<string, unknown> & SmsChannelConfig = { ...channelCfg };
-  const accountEntries:
-    | Record<string, Partial<Record<string, unknown> & SmsChannelConfig>>
-    | undefined = channelCfg.accounts
-    ? Object.fromEntries(
-        Object.entries(channelCfg.accounts).map(([accountKey, account]) => [
-          accountKey,
-          { ...account },
-        ]),
-      )
+  const accountEntries = channelCfg.accounts
+    ? Object.fromEntries(Object.entries(channelCfg.accounts).map(([k, v]) => [k, { ...v }]))
     : undefined;
   const merged = resolveMergedAccountConfig<Record<string, unknown> & SmsChannelConfig>({
-    channelConfig,
-    accounts: accountEntries,
-    accountId: id,
-    omitKeys: ["defaultAccount"],
+    channelConfig, accounts: accountEntries, accountId: id, omitKeys: ["defaultAccount"],
   });
 
   const useEnvFallbacks = id === DEFAULT_ACCOUNT_ID;
   const envAccountSid = useEnvFallbacks ? process.env.TWILIO_ACCOUNT_SID : undefined;
   const envAuthToken = useEnvFallbacks ? process.env.TWILIO_AUTH_TOKEN : undefined;
-  const envFromNumber = useEnvFallbacks
-    ? firstNonBlankEnv(process.env.TWILIO_PHONE_NUMBER, process.env.TWILIO_SMS_FROM)
-    : undefined;
-  const envMessagingServiceSid = useEnvFallbacks
-    ? process.env.TWILIO_MESSAGING_SERVICE_SID
-    : undefined;
+  const envFromNumber = useEnvFallbacks ? firstNonBlankEnv(process.env.TWILIO_PHONE_NUMBER, process.env.TWILIO_SMS_FROM) : undefined;
+  const envMessagingServiceSid = useEnvFallbacks ? process.env.TWILIO_MESSAGING_SERVICE_SID : undefined;
   const envWebhookPath = useEnvFallbacks ? process.env.SMS_WEBHOOK_PATH : undefined;
   const envPublicWebhookUrl = useEnvFallbacks ? process.env.SMS_PUBLIC_WEBHOOK_URL : undefined;
   const envAllowFrom = useEnvFallbacks ? process.env.SMS_ALLOWED_USERS : undefined;
-  const envTextChunkLimit = useEnvFallbacks ? process.env.SMS_TEXT_CHUNK_LIMIT : undefined;
-  const envDisableSignatureValidation = useEnvFallbacks
-    ? process.env.SMS_DANGEROUSLY_DISABLE_SIGNATURE_VALIDATION
-    : undefined;
+  const envDisableSigValidation = useEnvFallbacks ? process.env.SMS_DANGEROUSLY_DISABLE_SIGNATURE_VALIDATION : undefined;
 
   const webhookPath = (merged.webhookPath ?? envWebhookPath ?? DEFAULT_WEBHOOK_PATH).trim();
   const publicWebhookUrl = (merged.publicWebhookUrl ?? envPublicWebhookUrl ?? "").trim();
-  const authToken =
-    normalizeResolvedSecretInputString({
-      value: merged.authToken ?? envAuthToken,
-      path:
-        id === DEFAULT_ACCOUNT_ID
-          ? "channels.sms.authToken"
-          : `channels.sms.accounts.${id}.authToken`,
-    }) ?? "";
+
+  // Simplified auth token resolution (no SecretInput in 2026.5.7 compat mode — just plain string or env)
+  const authToken = (
+    (typeof merged.authToken === "string" ? merged.authToken : "") || envAuthToken || ""
+  ).trim();
+
   return {
     accountId: id,
     enabled: channelCfg.enabled !== false && accountConfig?.enabled !== false,
@@ -143,12 +107,10 @@ export function resolveSmsAccount(
     defaultTo: normalizeSmsPhoneNumber(merged.defaultTo ?? ""),
     webhookPath: webhookPath || DEFAULT_WEBHOOK_PATH,
     publicWebhookUrl,
-    dangerouslyDisableSignatureValidation:
-      merged.dangerouslyDisableSignatureValidation === true ||
-      envDisableSignatureValidation === "true",
+    dangerouslyDisableSignatureValidation: merged.dangerouslyDisableSignatureValidation === true || envDisableSigValidation === "true",
     dmPolicy: merged.dmPolicy ?? "pairing",
     allowFrom: parseList(merged.allowFrom ?? envAllowFrom),
-    textChunkLimit: parseTextChunkLimit(merged.textChunkLimit ?? envTextChunkLimit),
+    textChunkLimit: parseTextChunkLimit(merged.textChunkLimit),
   };
 }
 
@@ -160,15 +122,10 @@ export function inspectSmsAccount(cfg: OpenClawConfig, accountId?: string | null
     configured,
     tokenStatus: account.authToken ? "available" : "missing",
     webhookPath: account.webhookPath,
-    signatureValidation:
-      account.dangerouslyDisableSignatureValidation || account.publicWebhookUrl
-        ? "configured"
-        : "missing-public-url",
+    signatureValidation: account.dangerouslyDisableSignatureValidation || account.publicWebhookUrl ? "configured" : "missing-public-url",
   };
 }
 
 export function isSmsAccountConfigured(account: ResolvedSmsAccount): boolean {
-  return Boolean(
-    account.accountSid && account.authToken && (account.fromNumber || account.messagingServiceSid),
-  );
+  return Boolean(account.accountSid && account.authToken && (account.fromNumber || account.messagingServiceSid));
 }

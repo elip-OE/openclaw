@@ -1,5 +1,9 @@
-// Sms plugin module implements inbound behavior.
-import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-ingress-runtime";
+// Twilio SMS inbound handling — adapted for 2026.5.7 plugin API.
+// Uses dispatchInboundDirectDmWithRuntime (available in 2026.5.7) instead of
+// the 2026.6.2-only channelRuntime.inbound.run API.
+import { resolveInboundDirectDmAccessWithRuntime } from "openclaw/plugin-sdk/direct-dm-access";
+import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/direct-dm";
+import { isSenderIdAllowed } from "openclaw/plugin-sdk/allow-from";
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
@@ -16,7 +20,7 @@ type SmsLog = {
 
 export type SmsChannelRuntime = Pick<
   PluginRuntime["channel"],
-  "inbound" | "pairing" | "reply" | "routing" | "session"
+  "pairing" | "reply" | "routing" | "session"
 >;
 
 async function authorizeSmsSender(params: {
@@ -25,28 +29,54 @@ async function authorizeSmsSender(params: {
   channelRuntime: SmsChannelRuntime;
   from: string;
 }) {
-  return await resolveStableChannelMessageIngress({
-    channelId: CHANNEL_ID,
-    accountId: params.account.accountId,
-    cfg: params.cfg,
-    identity: {
-      key: "phone",
-      entryIdPrefix: "sms-entry",
-    },
-    readStoreAllowFrom: async () =>
-      await params.channelRuntime.pairing.readAllowFromStore({
+  // For allowlist policy, the 2026.5.7 SDK ignores the credential store.
+  // Merge store entries into allowFrom ourselves so pre-approved driver numbers
+  // are recognized without needing them in the config file.
+  let effectiveAllowFrom = params.account.allowFrom;
+  if (params.account.dmPolicy === "allowlist") {
+    try {
+      const storeEntries = await params.channelRuntime.pairing.readAllowFromStore({
         channel: CHANNEL_ID,
         accountId: params.account.accountId,
-      }),
-    subject: { stableId: params.from },
-    conversation: {
-      kind: "direct",
-      id: "direct",
-    },
-    event: { mayPair: true },
+      });
+      if (storeEntries?.length) {
+        effectiveAllowFrom = [...effectiveAllowFrom, ...storeEntries];
+      }
+    } catch { /* store read failed, continue with config-only allowFrom */ }
+  }
+
+  const result = await resolveInboundDirectDmAccessWithRuntime({
+    cfg: params.cfg,
+    channel: CHANNEL_ID,
+    accountId: params.account.accountId,
     dmPolicy: params.account.dmPolicy,
-    allowFrom: params.account.allowFrom,
+    allowFrom: effectiveAllowFrom,
+    senderId: params.from,
+    rawBody: "",
+    isSenderAllowed: (senderId: string, allowFrom: string[]) => {
+      const allow = {
+        hasEntries: allowFrom.length > 0,
+        hasWildcard: allowFrom.includes("*"),
+        entries: allowFrom,
+      };
+      return isSenderIdAllowed(allow, senderId);
+    },
+    runtime: {
+      shouldComputeCommandAuthorized: () => false,
+      resolveCommandAuthorizedFromAuthorizers: () => true,
+    },
+    readStoreAllowFrom: async (provider: string, accountId: string) =>
+      await params.channelRuntime.pairing.readAllowFromStore({
+        channel: provider,
+        accountId,
+      }),
   });
+  return {
+    senderAccess: {
+      allowed: result.access.decision === "allow",
+      decision: result.access.decision,
+    },
+  };
 }
 
 async function issueSmsPairingChallenge(params: {
@@ -68,18 +98,10 @@ async function issueSmsPairingChallenge(params: {
     senderId: params.from,
     senderIdLine: `Your SMS phone number: ${params.from}`,
     sendPairingReply: async (text) => {
-      await sendSmsTextChunks({
-        account: params.account,
-        to: params.from,
-        text,
-      });
+      await sendSmsTextChunks({ account: params.account, to: params.from, text });
     },
-    onCreated: () => {
-      params.log?.info?.(`SMS pairing request created for ${params.from}`);
-    },
-    onReplyError: (err) => {
-      params.log?.warn?.(`SMS pairing reply failed for ${params.from}: ${String(err)}`);
-    },
+    onCreated: () => { params.log?.info?.(`SMS pairing request created for ${params.from}`); },
+    onReplyError: (err) => { params.log?.warn?.(`SMS pairing reply failed for ${params.from}: ${String(err)}`); },
   });
 }
 
@@ -92,124 +114,48 @@ export async function dispatchSmsInboundEvent(params: {
 }): Promise<void> {
   const from = normalizeSmsPhoneNumber(params.msg.from);
   const auth = await authorizeSmsSender({
-    cfg: params.cfg,
-    account: params.account,
-    channelRuntime: params.channelRuntime,
-    from,
+    cfg: params.cfg, account: params.account, channelRuntime: params.channelRuntime, from,
   });
   if (!auth.senderAccess.allowed) {
     if (auth.senderAccess.decision === "pairing") {
-      await issueSmsPairingChallenge({
-        account: params.account,
-        channelRuntime: params.channelRuntime,
-        from,
-        log: params.log,
-      });
+      await issueSmsPairingChallenge({ account: params.account, channelRuntime: params.channelRuntime, from, log: params.log });
       return;
     }
     params.log?.warn?.(`SMS sender ${from} is not authorized`);
     return;
   }
 
-  const route = params.channelRuntime.routing.resolveAgentRoute({
+  await dispatchInboundDirectDmWithRuntime({
     cfg: params.cfg,
+    runtime: { channel: params.channelRuntime },
     channel: CHANNEL_ID,
+    channelLabel: "SMS",
     accountId: params.account.accountId,
-    peer: {
-      kind: "direct",
-      id: from,
+    peer: { kind: "direct", id: from },
+    senderId: from,
+    senderAddress: `sms:${from}`,
+    recipientAddress: `sms:${from}`,  // reply target = the sender (driver)
+    conversationLabel: from,
+    rawBody: params.msg.body,
+    messageId: params.msg.messageSid,
+    timestamp: Date.now(),
+    provider: "twilio",
+    surface: "sms",
+    extraContext: {
+      MessageSid: params.msg.messageSid,
+      To: params.msg.to,
     },
-  });
-  const sessionKey = route.sessionKey;
-
-  await params.channelRuntime.inbound.run({
-    channel: CHANNEL_ID,
-    accountId: params.account.accountId,
-    raw: params.msg,
-    adapter: {
-      ingest: (msg) => ({
-        id: msg.messageSid,
-        timestamp: Date.now(),
-        rawText: msg.body,
-        textForAgent: msg.body,
-        textForCommands: msg.body,
-        raw: msg,
-      }),
-      resolveTurn: async (input) => {
-        const ctxPayload = params.channelRuntime.inbound.buildContext({
-          channel: CHANNEL_ID,
-          accountId: params.account.accountId,
-          timestamp: input.timestamp,
-          from: `sms:${from}`,
-          sender: {
-            id: from,
-            name: from,
-          },
-          conversation: {
-            kind: "direct",
-            id: from,
-            label: from,
-          },
-          route: {
-            agentId: route.agentId,
-            accountId: params.account.accountId,
-            routeSessionKey: sessionKey,
-            dispatchSessionKey: sessionKey,
-          },
-          reply: {
-            to: `sms:${from}`,
-          },
-          message: {
-            rawBody: input.rawText,
-            commandBody: input.textForCommands,
-            bodyForAgent: input.textForAgent,
-          },
-          extra: {
-            MessageSid: params.msg.messageSid,
-            To: params.msg.to,
-          },
-        });
-        const storePath = params.channelRuntime.session.resolveStorePath(
-          params.cfg.session?.store,
-          {
-            agentId: route.agentId,
-          },
-        );
-        return {
-          cfg: params.cfg,
-          channel: CHANNEL_ID,
-          accountId: params.account.accountId,
-          agentId: route.agentId,
-          routeSessionKey: sessionKey,
-          storePath,
-          ctxPayload,
-          recordInboundSession: params.channelRuntime.session.recordInboundSession,
-          dispatchReplyWithBufferedBlockDispatcher:
-            params.channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher,
-          delivery: {
-            durable: () => ({
-              to: from,
-            }),
-            deliver: async (payload) => {
-              const text = payload.text;
-              if (!text) {
-                return { visibleReplySent: false };
-              }
-              await sendSmsTextChunks({
-                account: params.account,
-                to: from,
-                text,
-              });
-              return { visibleReplySent: true };
-            },
-          },
-          dispatcherOptions: {
-            onReplyStart: () => {
-              params.log?.info?.(`SMS reply started for ${from}`);
-            },
-          },
-        };
-      },
+    deliver: async (payload) => {
+      const text = payload.text;
+      if (text) {
+        await sendSmsTextChunks({ account: params.account, to: from, text });
+      }
+    },
+    onRecordError: (err) => {
+      params.log?.warn?.(`SMS session record error for ${from}: ${String(err)}`);
+    },
+    onDispatchError: (err, info) => {
+      params.log?.warn?.(`SMS dispatch error (${info.kind}) for ${from}: ${String(err)}`);
     },
   });
 }
