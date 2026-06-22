@@ -1,0 +1,15 @@
+{
+  "id": "whatsapp-check",
+  "name": "WhatsApp Number Check",
+  "description": "Check if phone numbers are registered on WhatsApp via Baileys onWhatsApp()",
+  "contracts": {
+    "tools": ["whatsapp_check"]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false
+  }
+}
